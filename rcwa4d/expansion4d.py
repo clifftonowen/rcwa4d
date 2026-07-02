@@ -1,4 +1,5 @@
 from .utils import *
+from .backend import ginv, gsolve  ### optional GPU/complex64 offload (default = numpy/CPU)
 hl=homogeneous_layer()
 sm=scatter_matrices()
 pq=PQ_matrices()
@@ -519,7 +520,7 @@ class rcwa:
 
         if self.Wr_expanded:
             Wr_expanded = self.Wr_expanded
-            Wr_expanded_inv = np.linalg.inv(Wr_expanded)
+            Wr_expanded_inv = ginv(Wr_expanded)
         else:
             Wr_expanded = np.eye(2*num_diffractions)
             Wr_expanded_inv = Wr_expanded
@@ -535,8 +536,8 @@ class rcwa:
         tx = transmitted[0:num_diffractions,:];
         ty = transmitted[num_diffractions:, :];
         # longitudinal components; should be 0
-        rz = np.linalg.inv(self.kzr) @ (self.Kx @ rx + self.Ky @ ry)
-        tz = np.linalg.inv(self.kzt) @ (self.Kx @ tx + self.Ky @ ty)
+        rz = ginv(self.kzr) @ (self.Kx @ rx + self.Ky @ ry)
+        tz = ginv(self.kzt) @ (self.Kx @ tx + self.Ky @ ty)
         r_sq = np.square(np.abs(rx)) +  np.square(np.abs(ry))+ np.square(np.abs(rz))
         t_sq = np.square(np.abs(tx)) +  np.square(np.abs(ty))+ np.square(np.abs(tz))
         ### diffraction efficiency in each order
@@ -575,12 +576,12 @@ class rcwa:
             Smat = self.internal_Smats[l]
             # print('Smat\n',Smat)
             ### cl1_minus, cl1_plus are mode coefficients immediately before the layer in gap medium
-            cl1_minus = np.linalg.solve(Smat['S12'], self.reflected - Smat['S11'].dot(self.cinc)) ### backward wave before l-th layer
+            cl1_minus = gsolve(Smat['S12'], self.reflected - Smat['S11'].dot(self.cinc)) ### backward wave before l-th layer
             cl1_plus = Smat['S21'].dot(self.cinc) + Smat['S22'].dot(cl1_minus)
             ### mode_coeff are mode coefficients in the layer at offset=0
             mode_to_fourier_l = np.block([[self.internal_Ws[l], self.internal_Ws[l]],[-self.internal_Vs[l], self.internal_Vs[l]]])
             mode_to_fourier_g = np.block([[self.internal_Wg, self.internal_Wg],[-self.internal_Vg, self.internal_Vg]])
-            mode_coeff = np.linalg.solve(mode_to_fourier_l, mode_to_fourier_g.dot(np.concatenate([cl1_plus, cl1_minus])))
+            mode_coeff = gsolve(mode_to_fourier_l, mode_to_fourier_g.dot(np.concatenate([cl1_plus, cl1_minus])))
             phase = np.diag(np.exp(np.concatenate([-self.internal_lambdas[l]*self.k0*z, self.internal_lambdas[l]*self.k0*z])))
             field_xy = mode_to_fourier_l.dot(phase.dot(mode_coeff)) ### len([E,H]) * len([x,y]) * num_Gs
             self.field_xy = field_xy ### ??? debugging
@@ -599,11 +600,11 @@ class rcwa:
                 if self.ER[l] is None:
                     econv_inv = np.eye(self.NM)
                 else:
-                    econv_inv = np.linalg.inv(self.ER[l])
+                    econv_inv = ginv(self.ER[l])
                 if self.UR[l] is None:
                     mconv_inv = np.eye(self.NM)
                 else:
-                    mconv_inv = np.linalg.inv(self.UR[l])
+                    mconv_inv = ginv(self.UR[l])
                 ### stitch into expanded k space if twisted
                 if self.twist!=0:
                     if self.orientations[l]==1:
@@ -633,17 +634,17 @@ class rcwa:
         # else:
         #     num_diffractions = self.NM
         W, V = self.internal_Wg, self.internal_Vg
-        cinc = np.linalg.inv(W)@self.cinc
+        cinc = ginv(W)@self.cinc
         mode_to_fourier = np.vstack([W,V])
         reflected = mode_to_fourier@self.Sg['S11']@cinc
         transmitted = mode_to_fourier@self.Sg['S21']@cinc
         erx,ery,hrx,hry = reflected.reshape(4,-1)
         etx,ety,htx,hty = transmitted.reshape(4,-1)
 
-        erz = np.linalg.inv(self.kzr) @ (self.Kx @ erx + self.Ky @ ery)
-        hrz = np.linalg.inv(self.kzr) @ (self.Kx @ hrx + self.Ky @ hry)
-        etz = np.linalg.inv(self.kzt) @ (self.Kx @ etx + self.Ky @ ety)
-        htz = np.linalg.inv(self.kzt) @ (self.Kx @ htx + self.Ky @ hty)
+        erz = ginv(self.kzr) @ (self.Kx @ erx + self.Ky @ ery)
+        hrz = ginv(self.kzr) @ (self.Kx @ hrx + self.Ky @ hry)
+        etz = ginv(self.kzt) @ (self.Kx @ etx + self.Ky @ ety)
+        htz = ginv(self.kzt) @ (self.Kx @ htx + self.Ky @ hty)
         return np.concatenate([erx,ery,erz,hrx,hry,hrz]),np.concatenate([etx,ety,etz,htx,hty,htz])
 
     def get_Stress_tensor(self, which_layers=None, offsets=None):

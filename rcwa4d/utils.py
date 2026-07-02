@@ -3,7 +3,7 @@ import sys
 import numpy as np
 import itertools
 from numpy import cos,sin
-from numpy.linalg import solve as bslash ### S4 mentions it is more efficient to FFT the inverted epsilon, but here we are inverting FFT matrix 
+from .backend import gsolve as bslash, geig, ginv  ### optional GPU/complex64 offload (default = numpy/CPU)
 from scipy.linalg import block_diag
 from copy import deepcopy as copy
 from tqdm import tqdm
@@ -32,7 +32,7 @@ class scatter_matrices:
         # assert type(V_layer) == np.matrixlib.defmatrix.matrix, 'not np.matrix'
         # assert type(Vg) == np.matrixlib.defmatrix.matrix, 'not np.matrix'
 
-        #A = np.linalg.inv(W_layer) * Wg + np.linalg.inv(V_layer) * Vg;
+        #A = ginv(W_layer) * Wg + ginv(V_layer) * Vg;
         A = bslash(W_layer, Wg) + bslash(V_layer, Vg);
 
         return A;
@@ -53,7 +53,7 @@ class scatter_matrices:
         # assert type(V_layer) == np.matrixlib.defmatrix.matrix, 'not np.matrix'
         # assert type(Vg) == np.matrixlib.defmatrix.matrix, 'not np.matrix'
 
-        #B = np.linalg.inv(W_layer) * Wg - np.linalg.inv(V_layer) * Vg;
+        #B = ginv(W_layer) * Wg - ginv(V_layer) * Vg;
         B = bslash(W_layer,Wg) - bslash(V_layer, Vg);
 
         return B;
@@ -125,15 +125,15 @@ class scatter_matrices:
         # assert type(Br) == np.matrixlib.defmatrix.matrix, 'not np.matrix'
 
         #
-        # S11 = -np.linalg.inv(Ar) * Br;
-        # S12 = 2*np.linalg.inv(Ar);
-        # S21 = 0.5*(Ar - Br * np.linalg.inv(Ar) * Br);
-        # S22 = Br * np.linalg.inv(Ar)
+        # S11 = -ginv(Ar) * Br;
+        # S12 = 2*ginv(Ar);
+        # S21 = 0.5*(Ar - Br * ginv(Ar) * Br);
+        # S22 = Br * ginv(Ar)
 
         S11 = -bslash(Ar,Br);
-        S12 = 2*np.linalg.inv(Ar);
+        S12 = 2*ginv(Ar);
         S21 = 0.5*(Ar - Br @ bslash(Ar,Br));
-        S22 = Br @ np.linalg.inv(Ar)
+        S22 = Br @ ginv(Ar)
         S_dict = {'S11': S11, 'S22': S22,  'S12': S12,  'S21': S21};
         S = np.block([[S11, S12], [S21, S22]]);
         return S, S_dict;
@@ -149,12 +149,12 @@ class scatter_matrices:
         # assert type(At) == np.matrixlib.defmatrix.matrix, 'not np.matrix'
         # assert type(Bt) == np.matrixlib.defmatrix.matrix, 'not np.matrix'
 
-        # S11 = (Bt) * np.linalg.inv(At);
-        # S21 = 2*np.linalg.inv(At);
-        # S12 = 0.5*(At - Bt * np.linalg.inv(At) * Bt);
-        # S22 = - np.linalg.inv(At)*Bt
-        S11 = (Bt) @ np.linalg.inv(At);
-        S21 = 2*np.linalg.inv(At);
+        # S11 = (Bt) * ginv(At);
+        # S21 = 2*ginv(At);
+        # S12 = 0.5*(At - Bt * ginv(At) * Bt);
+        # S22 = - ginv(At)*Bt
+        S11 = (Bt) @ ginv(At);
+        S21 = 2*ginv(At);
         S12 = 0.5*(At - Bt @ bslash(At,Bt));
         S22 = - bslash(At,Bt)
         S_dict = {'S11': S11, 'S22': S22,  'S12': S12,  'S21': S21};
@@ -170,7 +170,7 @@ class eigen_modes:
         :return:
         '''
         #could be an issue with how eig sorts eigenvalues in the output
-        lambda_squared, W = np.linalg.eig(Gamma_squared);  # LAMBDa is effectively refractive index
+        lambda_squared, W = geig(Gamma_squared);  # LAMBDa is effectively refractive index
         lambda_matrix = np.diag(np.sqrt(lambda_squared.astype('complex'))); ### ??? might need check branch cut here too
         return W, lambda_matrix
 
@@ -183,7 +183,7 @@ class eigen_modes:
         :param lambda_matrix: eigen values from W
         :return:
         '''
-        return Q@W@np.linalg.inv(lambda_matrix);
+        return Q@W@ginv(lambda_matrix);
 
 class rcwa_initial_conditions:
     def delta_vector(self, P, Q):
@@ -316,9 +316,9 @@ class homogeneous_layer:
         eigenvalues = block_diag(j*Kz, j*Kz) #determining the modes of ex, ey... so it appears eigenvalue order MATTERS...
         ### ??? this is where the convention of \pm kz kicks in?!
         #W is just identity matrix
-        V = Q@np.linalg.inv(eigenvalues); #eigenvalue order is arbitrary (hard to compare with matlab
+        V = Q@ginv(eigenvalues); #eigenvalue order is arbitrary (hard to compare with matlab
         #alternative V with no inverse
-        #V = np.matmul(np.linalg.inv(P),np.matmul(Q,W)); apparently, this fails because P is singular
+        #V = np.matmul(ginv(P),np.matmul(Q,W)); apparently, this fails because P is singular
 
         # N = len(W)//2
         # print(W.shape, V.shape)
@@ -380,8 +380,8 @@ class redheffer_star:
         N = len(SA_11) #SA_11 should be square so length is fine
         I = np.matrix(np.identity(N));
 
-        # D = np.linalg.inv(I-SB_11*SA_22);
-        # F = np.linalg.inv(I-SA_22*SB_11);
+        # D = ginv(I-SB_11*SA_22);
+        # F = ginv(I-SA_22*SB_11);
         #
         # SAB_11 = SA_11 + SA_12*D*SB_11*SA_21;
         # SAB_12 = SA_12*D*SB_12;
@@ -414,7 +414,7 @@ class redheffer_star:
         assert type(SB) == dict, 'not dict'
 
         # R-inv and R
-        R_inv = np.linalg.inv(R)
+        R_inv = ginv(R)
 
         # once we break every thing like this, we should still have matrices
         SA_11 = SA['S11']; SA_12 = SA['S12']; SA_21 = SA['S21']; SA_22 = SA['S22'];
@@ -422,8 +422,8 @@ class redheffer_star:
         N = len(SA_11) #SA_11 should be square so length is fine
         I = np.matrix(np.identity(N));
 
-        # D = np.linalg.inv(I-SB_11*SA_22);
-        # F = np.linalg.inv(I-SA_22*SB_11);
+        # D = ginv(I-SB_11*SA_22);
+        # F = ginv(I-SA_22*SB_11);
         #
         # SAB_11 = SA_11 + SA_12*D*SB_11*SA_21;
         # SAB_12 = SA_12*D*SB_12;
