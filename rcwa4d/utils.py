@@ -4,6 +4,7 @@ import numpy as np
 import itertools
 from numpy import cos,sin
 from .backend import gsolve as bslash, geig, ginv  ### optional GPU/complex64 offload (default = numpy/CPU)
+from .backend import redheffer_star_gpu, redheffer_offload  ### GPU-resident RedhefferStar (default = no-op, see below)
 from scipy.linalg import block_diag
 from copy import deepcopy as copy
 from tqdm import tqdm
@@ -633,6 +634,12 @@ def expand_W_matrix(Ws,NM,layer=1):
 def RedhefferStar(SA,SB): #SA and SB are both 2x2 block matrices;
     assert type(SA) == dict, 'not dict'
     assert type(SB) == dict, 'not dict'
+    if redheffer_offload(len(SA['S11'])):
+        # GPU-resident path (RCWA4D_DEVICE=gpu, blocks large enough to clear
+        # RCWA4D_GPU_MIN): batches the whole star product in one GPU round
+        # trip instead of offloading only inv/solve/eig piecemeal. Default
+        # (RCWA4D_DEVICE=cpu) never reaches here -- see backend.py.
+        return redheffer_star_gpu(SA, SB)
     SA_11 = SA['S11']; SA_12 = SA['S12']; SA_21 = SA['S21']; SA_22 = SA['S22'];
     SB_11 = SB['S11']; SB_12 = SB['S12']; SB_21 = SB['S21']; SB_22 = SB['S22'];
     N = len(SA_11) #SA_11 should be square so length is fine
